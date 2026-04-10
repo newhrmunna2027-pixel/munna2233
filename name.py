@@ -4,6 +4,7 @@ import time
 import httpx
 import json
 import itertools
+import os
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from typing import Tuple
@@ -58,7 +59,7 @@ BOT_ACCOUNTS = [
 
 MAIN_KEY = base64.b64decode('WWcmdGMlREV1aDYlWmNeOA==')
 MAIN_IV = base64.b64decode('Nm95WkRyMjJFM3ljaGpNJQ==')
-RELEASEVERSION = "OB52"
+RELEASEVERSION = "OB53"
 USERAGENT = "Dalvik/2.1.0 (Linux; U; Android 10; SM-A515F Build/QP1A.190711.020)"
 
 app = Flask(__name__)
@@ -159,7 +160,7 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         return json.loads(json_format.MessageToJson(decode_protobuf(decrypted_content, AccountPersonalShowInfo), preserving_proto_field_name=True))
 
 # ==========================================
-# 6. ASYNC FLASK ROUTE FOR VERCEL
+# 6. ASYNC FLASK ROUTE FOR VERCEL & LOCALHOST
 # ==========================================
 @app.route('/')
 def home():
@@ -184,5 +185,12 @@ async def get_account_info():
     except Exception as e:
         return jsonify({"error": f"Failed to fetch player info: {str(e)}"}), 500
 
-# (Vercel uses the 'app' object automatically, no need for app.run)
+# ==========================================
+# LOCALHOST SUPPORT
+# ==========================================
+if __name__ == '__main__':
+    # This block will ONLY run if you execute this file locally (e.g., `python info.py` or `python name.py`).
+    # It will NOT run on Vercel, because Vercel uses the `app` object directly via WSGI.
+    print("Running in Localhost mode...")
+    app.run(host='0.0.0.0', port=5000, debug=True)
 # --- END OF FILE name.py ---
