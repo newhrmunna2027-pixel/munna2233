@@ -96,14 +96,16 @@ async def json_to_proto(json_data: str, proto_message: Message) -> bytes:
     return proto_message.SerializeToString()
 
 # ==========================================
-# 4. GARENA AUTHENTICATION FLOW
+# 4. GARENA AUTHENTICATION FLOW (UPDATED FROM OB53)
 # ==========================================
+# lord2.py থেকে নতুন User-Agent নেওয়া হলো
+USERAGENT = "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_I005DA Build/PI)"
+
 async def get_access_token(bot_index: int):
     bot = BOT_ACCOUNTS[bot_index]
     url = "https://100067.connect.garena.com/oauth/guest/token/grant"
     payload = {"uid": bot["uid"], "password": bot["pass"], "response_type": "token", "client_type": "2", "client_id": "100067", "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"}
     
-    # FIX: Added Connection: close (like main.py) and timeout
     headers = {'User-Agent': USERAGENT, 'Connection': "close", 'Accept-Encoding': "gzip", 'Content-Type': "application/x-www-form-urlencoded"}
     
     async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
@@ -122,9 +124,9 @@ async def create_bd_jwt(bot_index: int):
     proto_bytes = await json_to_proto(body, LoginReq())
     payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, proto_bytes)
     
-    url = "https://loginbp.ggblueshark.com/MajorLogin"
+    # FIX: ggblueshark.com এর বদলে lord2.py এর ggpolarbear.com দেওয়া হলো
+    url = "https://loginbp.ggpolarbear.com/MajorLogin"
     
-    # FIX: Removed Expect: 100-continue (causes errors)
     headers = {
         'User-Agent': USERAGENT, 
         'Accept-Encoding': "gzip", 
@@ -146,8 +148,6 @@ async def create_bd_jwt(bot_index: int):
                 
             BD_TOKENS_CACHE[bot_index]['token'] = f"Bearer {real_token}"
             BD_TOKENS_CACHE[bot_index]['server_url'] = msg.get('server_url') or msg.get('serverUrl') or '0'
-            
-            # FIX: Token Expiration reduced to 1 hour (3600s) from 7 hours. 
             BD_TOKENS_CACHE[bot_index]['expires_at'] = time.time() + 3600 
         except Exception as e: 
             pass
@@ -159,16 +159,16 @@ async def get_valid_token(bot_index: int) -> Tuple[str, str]:
     return BD_TOKENS_CACHE[bot_index]['token'], BD_TOKENS_CACHE[bot_index]['server_url']
 
 # ==========================================
-# 5. FETCH PLAYER INFO
+# 5. FETCH PLAYER INFO (FIXED DECODING)
 # ==========================================
 async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
-    payload = await json_to_proto(json.dumps({'a': uid, 'b': "7"}), GetPlayerPersonalShow())
+    # a: uid, b: 7 (Full Profile Request)
+    payload = await json_to_proto(json.dumps({'a': uid, 'b': 7}), GetPlayerPersonalShow())
     data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
     
     token, server = await get_valid_token(bot_index)
     if token == "0" or server == "0": raise Exception("Token generation failed.")
         
-    # FIX: Remove Expect: 100-continue
     headers = {
         'User-Agent': USERAGENT, 
         'Accept-Encoding': "gzip", 
@@ -179,7 +179,7 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         'ReleaseVersion': RELEASEVERSION
     }
     
-    # FIX: Proper URL formatting
+    # URL formatting
     full_url = f"{server.rstrip('/')}{endpoint}"
 
     async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
@@ -187,7 +187,19 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         if resp.status_code != 200: raise Exception(f"Server Error: {resp.status_code}")
             
         decrypted_content = aes_cbc_decrypt(MAIN_KEY, MAIN_IV, resp.content)
-        return json.loads(json_format.MessageToJson(decode_protobuf(decrypted_content, AccountPersonalShowInfo), preserving_proto_field_name=True))
+        
+        try:
+            # Protobuf ডিকোড করার চেষ্টা
+            parsed_data = decode_protobuf(decrypted_content, AccountPersonalShowInfo)
+            return json.loads(json_format.MessageToJson(parsed_data, preserving_proto_field_name=True))
+        except Exception as e:
+            # যদি ডিকোড ফেইল করে, তারমানে গ্যারেনা সার্ভার প্রোফাইল ডাটার বদলে অন্যকিছু (Error/Ban Data) পাঠিয়েছে।
+            # Debugging এর জন্য Raw Hex যুক্ত করা হলো
+            raw_hex = decrypted_content.hex()
+            if len(raw_hex) < 50:
+                raise Exception("Account Not Found or Banned. Server returned empty data.")
+            else:
+                raise Exception("Garena Server returned unrecognized data structure (OB53 Schema Change).")
 
 # ==========================================
 # 6. ASYNC FLASK ROUTE FOR VERCEL & LOCALHOST
