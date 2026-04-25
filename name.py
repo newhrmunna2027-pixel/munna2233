@@ -39,7 +39,7 @@ GetPlayerPersonalShow = _globals['GetPlayerPersonalShow']
 AccountPersonalShowInfo = _globals['AccountPersonalShowInfo']
 
 # ==========================================
-# 2. CONFIGURATION & MULTI-BOT CREDENTIALS
+# 2. CONFIGURATION & CREDENTIALS
 # ==========================================
 BOT_ACCOUNTS = [
     {"uid": "4744822452", "pass": "OUT_OF_LAW_47145DFBD348F5F2D68B5D75AFA957AF10BE04EF89332B5B8E5EA"},
@@ -66,36 +66,8 @@ BD_TOKENS_CACHE = [{"token": "0", "server_url": "0", "expires_at": 0} for _ in B
 bot_cycle = itertools.cycle(range(len(BOT_ACCOUNTS)))
 
 # ==========================================
-# 3. SAFE PROTOBUF DECODER IMPORT
+# 3. ENCRYPTION & DECRYPTION 
 # ==========================================
-try:
-    from protobuf_decoder.protobuf_decoder import Parser
-    HAS_DECODER = True
-except ImportError as e:
-    HAS_DECODER = False
-    DECODER_ERROR_MSG = str(e)
-
-def Fix_PackEt(parsed_results):
-    result_dict = {}
-    for result in parsed_results:
-        field_data = {}
-        field_data['wire_type'] = result.wire_type
-        if result.wire_type == "varint": field_data['data'] = result.data
-        elif result.wire_type == "string": field_data['data'] = result.data
-        elif result.wire_type == "bytes": field_data['data'] = result.data
-        elif result.wire_type == 'length_delimited': field_data["data"] = Fix_PackEt(result.data.results)
-        result_dict[result.field] = field_data
-    return result_dict
-
-def DeCode_Raw_Protobuf(hex_string):
-    if not HAS_DECODER:
-        return {"error": "Missing protobuf_decoder module on Vercel."}
-    try:
-        parsed_results = Parser().parse(hex_string)
-        return Fix_PackEt(parsed_results)
-    except Exception as e:
-        return {"error": f"Raw Decode Failed: {str(e)}"}
-
 def aes_cbc_encrypt(key: bytes, iv: bytes, plaintext: bytes) -> bytes:
     aes = AES.new(key, AES.MODE_CBC, iv)
     return aes.encrypt(pad(plaintext, AES.block_size))
@@ -126,8 +98,8 @@ async def get_access_token(bot_index: int):
     payload = {"uid": bot["uid"], "password": bot["pass"], "response_type": "token", "client_type": "2", "client_id": "100067", "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"}
     headers = {'User-Agent': USERAGENT, 'Connection': "close", 'Accept-Encoding': "gzip", 'Content-Type': "application/x-www-form-urlencoded"}
     
-    # Timeout reduced to prevent Vercel 500 error
-    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+    # 🚨 Timeout Set to 4 Seconds to avoid Vercel kill
+    async with httpx.AsyncClient(verify=False, timeout=4.0) as client:
         try:
             resp = await client.post(url, data=payload, headers=headers)
             data = resp.json()
@@ -153,8 +125,8 @@ async def create_bd_jwt(bot_index: int):
         'ReleaseVersion': RELEASEVERSION
     }
     
-    # Timeout reduced to 8s
-    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+    # 🚨 Timeout Set to 5 Seconds
+    async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
         try:
             resp = await client.post(url, data=payload, headers=headers)
             if resp.status_code != 200: return
@@ -178,14 +150,14 @@ async def get_valid_token(bot_index: int) -> Tuple[str, str]:
 # ==========================================
 # 5. FETCH PLAYER INFO
 # ==========================================
-async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
+async def async_get_account_info(uid: str, current_bot_index: int):
     payload = await json_to_proto(json.dumps({'a': uid, 'b': 7}), GetPlayerPersonalShow())
     data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
     
-    token, server = await get_valid_token(bot_index)
+    token, server = await get_valid_token(current_bot_index)
     
     if token == "0" or server == "0": 
-        raise Exception(json.dumps({"error": f"Token generation failed for Bot Index {bot_index}"}))
+        raise Exception("Token generation failed.")
         
     headers = {
         'User-Agent': USERAGENT, 
@@ -197,74 +169,74 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         'ReleaseVersion': RELEASEVERSION
     }
     
-    full_url = f"{server.rstrip('/')}{endpoint}"
+    full_url = f"{server.rstrip('/')}/GetPlayerPersonalShow"
 
-    # Timeout reduced to 8s
-    async with httpx.AsyncClient(verify=False, timeout=8.0) as client:
+    # 🚨 Timeout Set to 5 Seconds
+    async with httpx.AsyncClient(verify=False, timeout=5.0) as client:
         resp = await client.post(full_url, data=data_enc, headers=headers)
         
         if resp.status_code != 200: 
-            raise Exception(json.dumps({"error": f"HTTP Error {resp.status_code}", "body": resp.text}))
+            raise Exception(f"HTTP Error {resp.status_code}")
             
         decrypted_content = aes_cbc_decrypt(MAIN_KEY, MAIN_IV, resp.content)
         
         try:
-            # 1. Try Normal Schema
+            # Normal Protobuf Schema parsing
             parsed_data = decode_protobuf(decrypted_content, AccountPersonalShowInfo)
             return json.loads(json_format.MessageToJson(parsed_data, preserving_proto_field_name=True))
         
         except Exception as e:
-            # 2. Fallback to Raw Data Hex
+            # If parsing fails, output the raw hex cleanly
             raw_hex = decrypted_content.hex()
-            
-            debug_info = {
-                "message": "Schema Bypassed! Showing Raw Hex",
-                "bot_index_used": bot_index,
-                "garena_raw_hex": raw_hex,
-            }
-            
-            # If decoder module exists, decode it here
-            if HAS_DECODER:
-                debug_info["raw_data_decoded"] = DeCode_Raw_Protobuf(raw_hex)
-            else:
-                debug_info["notice"] = "Upload 'protobuf_decoder' folder to Vercel to auto-decode this HEX."
-
-            raise Exception(json.dumps(debug_info))
+            raise Exception(json.dumps({
+                "message": "OB53 Protobuf Schema Changed! Please copy this hex and give it to the developer.",
+                "bot_index": current_bot_index,
+                "garena_raw_hex": raw_hex
+            }))
 
 # ==========================================
-# 6. ASYNC FLASK ROUTE
+# 6. FLASK ROUTE (SYNC WRAPPER FOR VERCEL)
 # ==========================================
 @app.route('/')
 def home():
     return jsonify({"status": "API is Online", "usage": "/player-info?uid=YOUR_UID"})
 
 @app.route('/player-info')
-async def get_account_info():
+def get_account_info():
     uid = request.args.get('uid')
     if not uid: return jsonify({"error": "Please provide UID."}), 400
 
     last_error_data = {}
     
-    # Loop reduced from 3 to 2 to prevent Vercel 10s Timeout Limit
-    for _ in range(2):
-        current_bot_index = next(bot_cycle)
-        try:
-            return_data = await GetAccountInformation(uid, "/GetPlayerPersonalShow", current_bot_index)
-            if return_data: 
-                formatted_json = json.dumps(return_data, ensure_ascii=False)
-                return Response(formatted_json, status=200, mimetype='application/json; charset=utf-8')
-                
-        except Exception as e:
+    # 🚨 VERCEL FIX: Synchronous Wrapper. This prevents 500 FUNCTION_INVOCATION_FAILED.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Retry only 2 times to stay well within 10s limit
+        for _ in range(2):
+            current_bot_index = next(bot_cycle)
             try:
-                last_error_data = json.loads(str(e))
-            except:
-                last_error_data = {"raw_error": str(e)}
-            continue 
+                return_data = loop.run_until_complete(async_get_account_info(uid, current_bot_index))
+                
+                if return_data: 
+                    formatted_json = json.dumps(return_data, ensure_ascii=False)
+                    return Response(formatted_json, status=200, mimetype='application/json; charset=utf-8')
+                    
+            except Exception as e:
+                try:
+                    last_error_data = json.loads(str(e))
+                except:
+                    last_error_data = {"raw_error": str(e)}
+                continue 
 
-    return jsonify({
-        "error": "Failed to parse info or missing module.",
-        "debug_info": last_error_data
-    }), 500
+        return jsonify({
+            "error": "Failed after 2 attempts.",
+            "debug_info": last_error_data
+        }), 500
+
+    finally:
+        loop.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
