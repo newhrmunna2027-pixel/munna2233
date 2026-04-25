@@ -101,59 +101,50 @@ def get_access_token(account_str: str):
     }
     
     with httpx.Client() as client:
-        # Timeout reduced to 7s to prevent Vercel 10s Server Crash
-        resp = client.post(url, content=payload.encode('utf-8'), headers=headers, timeout=7.0)
+        resp = client.post(url, content=payload.encode('utf-8'), headers=headers, timeout=8.0)
         if resp.status_code != 200:
-            raise Exception(f"Garena Auth Failed (Blocked or Timeout): HTTP {resp.status_code}")
+            raise Exception(f"Garena Auth Failed: HTTP {resp.status_code}")
             
-        try:
-            data = resp.json()
-        except ValueError:
-            raise Exception(f"Garena returned non-JSON data")
-            
+        data = resp.json()
         return data.get("access_token", "0"), data.get("open_id", "0")
 
 def create_jwt_for_account(idx: int, account_str: str):
-    try:
-        token_val, open_id = get_access_token(account_str)
-        body = json.dumps({
-            "open_id": open_id,
-            "open_id_type": "4",
-            "login_token": token_val,
-            "orign_platform_type": "4"
-        })
+    token_val, open_id = get_access_token(account_str)
+    body = json.dumps({
+        "open_id": open_id,
+        "open_id_type": "4",
+        "login_token": token_val,
+        "orign_platform_type": "4"
+    })
+    
+    proto_bytes = json_to_proto(body, LoginReq())
+    payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, proto_bytes)
+    url = "https://loginbp.ggblueshark.com/MajorLogin"
+    headers = {
+        'User-Agent': USERAGENT,
+        'Connection': "Keep-Alive",
+        'Accept-Encoding': "gzip",
+        'Content-Type': "application/octet-stream",
+        'Expect': "100-continue",
+        'X-Unity-Version': "2018.4.11f1",
+        'X-GA': "v1 1",
+        'ReleaseVersion': RELEASEVERSION
+    }
+    
+    with httpx.Client() as client:
+        resp = client.post(url, content=payload, headers=headers, timeout=8.0)
+        if resp.status_code != 200 or not resp.content or resp.content.startswith(b'BR_GOP_TOKEN_AUTH_FAILED'):
+            raise RuntimeError(f"Token request failed for account index {idx}")
         
-        proto_bytes = json_to_proto(body, LoginReq())
-        payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, proto_bytes)
-        url = "https://loginbp.ggblueshark.com/MajorLogin"
-        headers = {
-            'User-Agent': USERAGENT,
-            'Connection': "Keep-Alive",
-            'Accept-Encoding': "gzip",
-            'Content-Type': "application/octet-stream",
-            'Expect': "100-continue",
-            'X-Unity-Version': "2018.4.11f1",
-            'X-GA': "v1 1",
-            'ReleaseVersion': RELEASEVERSION
-        }
-        
-        with httpx.Client() as client:
-            resp = client.post(url, content=payload, headers=headers, timeout=7.0)
-            if resp.status_code != 200 or not resp.content or resp.content.startswith(b'BR_GOP_TOKEN_AUTH_FAILED'):
-                raise RuntimeError(f"Token request failed for account index {idx}")
-            
-            msg = json.loads(json_format.MessageToJson(decode_protobuf(resp.content, LoginRes)))
+        msg = json.loads(json_format.MessageToJson(decode_protobuf(resp.content, LoginRes)))
 
-            token_pool[idx] = {
-                'token': f"Bearer {msg.get('token','0')}",
-                'region': msg.get('lockRegion','0'),
-                'server_url': msg.get('serverUrl','0'),
-                'expires_at': time.time() + 25200
-            }
-            return token_pool[idx]
-    except Exception as e:
-        print(f"Error generating token for Account [{idx}]: {e}")
-        raise e
+        token_pool[idx] = {
+            'token': f"Bearer {msg.get('token','0')}",
+            'region': msg.get('lockRegion','0'),
+            'server_url': msg.get('serverUrl','0'),
+            'expires_at': time.time() + 25200
+        }
+        return token_pool[idx]
 
 def get_rotated_token_info() -> Tuple[int, str, str, str]:
     idx = get_next_account_index()
@@ -184,7 +175,7 @@ def GetAccountInformation(uid, unk, endpoint):
     }
     
     with httpx.Client() as client:
-        resp = client.post(server+endpoint, content=data_enc, headers=headers, timeout=7.0)
+        resp = client.post(server+endpoint, content=data_enc, headers=headers, timeout=8.0)
         if resp.status_code == 401:
             create_jwt_for_account(acc_idx, ACCOUNTS[acc_idx])
             return GetAccountInformation(uid, unk, endpoint)
@@ -214,8 +205,6 @@ def home():
         "App Name": "Info Flask Api",
         "Version": "4.0.0",
         "Status": "Running Seamlessly",
-        "Author": "Zero Gravity",
-        "End Point": "/player-info?uid=1765197992",
         "Accounts Pool": f"{len(ACCOUNTS)} Accounts Loaded"
     })
 
@@ -234,5 +223,6 @@ def get_account_info():
     except Exception as e:
         return jsonify({"error": f"Failed to fetch info: {str(e)}"}), 500
 
+# Vercel needs 'app' variable, which we already created above.
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
