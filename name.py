@@ -159,15 +159,17 @@ async def get_valid_token(bot_index: int) -> Tuple[str, str]:
     return BD_TOKENS_CACHE[bot_index]['token'], BD_TOKENS_CACHE[bot_index]['server_url']
 
 # ==========================================
-# 5. FETCH PLAYER INFO (FIXED DECODING)
+# 5. FETCH PLAYER INFO (WITH RAW DEBUGGER)
 # ==========================================
 async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
-    # a: uid, b: 7 (Full Profile Request)
     payload = await json_to_proto(json.dumps({'a': uid, 'b': 7}), GetPlayerPersonalShow())
     data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
     
     token, server = await get_valid_token(bot_index)
-    if token == "0" or server == "0": raise Exception("Token generation failed.")
+    
+    if token == "0" or server == "0": 
+        # টোকেন ফেইল হলে কোন বটের টোকেন ফেইল হলো সেটা দেখার জন্য
+        raise Exception(json.dumps({"error": f"Token generation failed for Bot Index {bot_index}"}))
         
     headers = {
         'User-Agent': USERAGENT, 
@@ -179,27 +181,41 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         'ReleaseVersion': RELEASEVERSION
     }
     
-    # URL formatting
     full_url = f"{server.rstrip('/')}{endpoint}"
 
     async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         resp = await client.post(full_url, data=data_enc, headers=headers)
-        if resp.status_code != 200: raise Exception(f"Server Error: {resp.status_code}")
+        
+        if resp.status_code != 200: 
+            raise Exception(json.dumps({"error": f"HTTP Error {resp.status_code}", "body": resp.text}))
             
         decrypted_content = aes_cbc_decrypt(MAIN_KEY, MAIN_IV, resp.content)
         
         try:
-            # Protobuf ডিকোড করার চেষ্টা
+            # নরমালি ডিকোড করার চেষ্টা করবে
             parsed_data = decode_protobuf(decrypted_content, AccountPersonalShowInfo)
             return json.loads(json_format.MessageToJson(parsed_data, preserving_proto_field_name=True))
+        
         except Exception as e:
-            # যদি ডিকোড ফেইল করে, তারমানে গ্যারেনা সার্ভার প্রোফাইল ডাটার বদলে অন্যকিছু (Error/Ban Data) পাঠিয়েছে।
-            # Debugging এর জন্য Raw Hex যুক্ত করা হলো
+            # 🚨 যদি ডিকোড ফেইল করে, তাহলে গ্যারেনার আসল ডাটা ক্যাপচার করবে
             raw_hex = decrypted_content.hex()
-            if len(raw_hex) < 50:
-                raise Exception("Account Not Found or Banned. Server returned empty data.")
-            else:
-                raise Exception("Garena Server returned unrecognized data structure (OB53 Schema Change).")
+            
+            # ডাটাটি যদি Text বা JSON ফরম্যাটে থাকে, সেটা বের করার চেষ্টা
+            raw_text = ""
+            try:
+                raw_text = decrypted_content.decode('utf-8', errors='ignore')
+            except:
+                raw_text = "Not readable text"
+
+            # Error মেসেজ হিসেবে Raw ডাটা থ্রো করবে
+            debug_info = {
+                "message": "Failed to Parse Protobuf. See Raw Data below.",
+                "bot_index_used": bot_index,
+                "garena_raw_text": raw_text,
+                "garena_raw_hex": raw_hex,
+                "python_error": str(e)
+            }
+            raise Exception(json.dumps(debug_info))
 
 # ==========================================
 # 6. ASYNC FLASK ROUTE FOR VERCEL & LOCALHOST
@@ -213,26 +229,29 @@ async def get_account_info():
     uid = request.args.get('uid')
     if not uid: return jsonify({"error": "Please provide UID."}), 400
 
-    # ========================================================
-    # FIX: AUTO RETRY / FALLBACK LOGIC
-    # ========================================================
-    # যদি কোনো কারণে ১টা বট কাজ না করে, API আরো ২ বার অন্য বট দিয়ে ট্রাই করবে।
-    last_error = ""
+    last_error_data = {}
+    
     for _ in range(3):
         current_bot_index = next(bot_cycle)
         try:
             return_data = await GetAccountInformation(uid, "/GetPlayerPersonalShow", current_bot_index)
-            
             if return_data: 
                 formatted_json = json.dumps(return_data, ensure_ascii=False)
                 return Response(formatted_json, status=200, mimetype='application/json; charset=utf-8')
                 
         except Exception as e:
-            last_error = str(e)
-            continue # পরবর্তী বটের কাছে যাবে
+            # Error টিকে JSON হিসেবে পার্স করে স্টোর করবে
+            try:
+                last_error_data = json.loads(str(e))
+            except:
+                last_error_data = {"raw_error": str(e)}
+            continue # পরের বট দিয়ে ট্রাই করবে
 
-    # যদি ৩ বারের চেষ্টাতেও ফেইল করে:
-    return jsonify({"error": f"Failed after multiple attempts. Last issue: {last_error}"}), 500
+    # ৩ বারের চেষ্টাতেও ফেইল করলে ডিবাগ ইনফরমেশন শো করবে
+    return jsonify({
+        "error": "Failed after multiple attempts.",
+        "debug_info": last_error_data
+    }), 500
 
 # ==========================================
 # LOCALHOST SUPPORT
