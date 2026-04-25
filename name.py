@@ -1,5 +1,4 @@
 # === Standard Imports ===
-import asyncio
 import time
 import httpx
 import json
@@ -26,7 +25,7 @@ DESCRIPTOR_2 = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x46reeFire.
 
 DESCRIPTOR_3 = _descriptor_pool.Default().AddSerializedFile(b'\n\x0csample.proto\"*\n\x12SearchWorkshopCode\x12\t\n\x01\x61\x18\x01 \x01(\t\x12\t\n\x01\x62\x18\x02 \x01(\x05\"-\n\x15GetPlayerPersonalShow\x12\t\n\x01\x61\x18\x01 \x01(\x03\x12\t\n\x01\x62\x18\x02 \x01(\x05\"\xf8\x08\n\x0cJwtGenerator\x12\x11\n\ttimestamp\x18\x03 \x01(\t\x12\x11\n\tgame_name\x18\x04 \x01(\t\x12\x14\n\x0cversion_code\x18\x05 \x01(\x05\x12\x13\n\x0b\x61pp_version\x18\x07 \x01(\t\x12\x17\n\x0f\x61ndroid_version\x18\x08 \x01(\t\x12\x13\n\x0b\x64\x65vice_type\x18\t \x01(\t\x12\x18\n\x10network_provider\x18\n \x01(\t\x12\x14\n\x0cnetwork_type\x18\x0b \x01(\t\x12\x14\n\x0cscreen_width\x18\x0c \x01(\x05\x12\x15\n\rscreen_height\x18\r \x01(\x05\x12\x0b\n\x03\x64pi\x18\x0e \x01(\t\x12\x10\n\x08\x63pu_info\x18\x0f \x01(\t\x12\x0b\n\x03\x66ps\x18\x10 \x01(\x05\x12\x11\n\tgpu_model\x18\x11 \x01(\t\x12\x16\n\x0eopengl_version\x18\x12 \x01(\t\x12\x11\n\tdevice_id\x18\x13 \x01(\t\x12\x12\n\nip_address\x18\x14 \x01(\t\x12\x10\n\x08language\x18\x15 \x01(\t\x12\x13\n\x0b\x64\x65vice_hash\x18\x16 \x01(\t\x12\x14\n\x0cos_api_level\x18\x17 \x01(\t\x12\x15\n\ros_build_type\x18\x18 \x01(\t\x12\x14\n\x0c\x64\x65vice_model\x18\x19 \x01(\t\x12\x19\n\x11package_signature\x18\x1d \x01(\t\x12\x12\n\nuser_level\x18\x1e \x01(\x05\x12\x14\n\x0c\x63\x61rrier_name\x18) \x01(\t\x12\x1a\n\x12network_generation\x18* \x01(\t\x12\x15\n\rapp_signature\x18\x39 \x01(\t\x12\x11\n\tplayer_id\x18< \x01(\x03\x12\x12\n\nsession_id\x18= \x01(\x03\x12\x10\n\x08match_id\x18> \x01(\x05\x12\r\n\x05score\x18@ \x01(\x03\x12\x13\n\x0btotal_score\x18\x41 \x01(\x03\x12\x12\n\nhigh_score\x18\x42 \x01(\x03\x12\x11\n\tmax_score\x18\x43 \x01(\x03\x12\x13\n\x0bplayer_rank\x18I \x01(\x05\x12\x17\n\x0fnative_lib_path\x18J \x01(\t\x12\x15\n\ris_debuggable\x18L \x01(\x05\x12\x12\n\napp_source\x18M \x01(\t\x12\x0f\n\x07is_beta\x18N \x01(\x05\x12\x11\n\tis_tester\x18O \x01(\x05\x12\x1b\n\x13target_architecture\x18Q \x01(\t\x12\x18\n\x10\x61pp_version_code\x18S \x01(\t\x12\x19\n\x11\x61pp_revision_code\x18U \x01(\x05\x12\x14\n\x0cgraphics_api\x18V \x01(\t\x12\x18\n\x10max_texture_size\x18W \x01(\x05\x12\x17\n\x0fprocessor_count\x18X \x01(\x05\x12\x16\n\x0e\x65ncryption_key\x18Y \x01(\t\x12\x19\n\x11\x66rame_buffer_size\x18\\ \x01(\x05\x12\x15\n\rplatform_type\x18] \x01(\t\x12\x16\n\x0esecurity_token\x18^ \x01(\t\x12\x18\n\x10\x64isplay_settings\x18` \x01(\t\x12\x14\n\x0cis_logged_in\x18\x61 \x01(\x05\x62\x06proto3')
 
-# --- SAFELY Generate Protobuf Classes (Fixes KeyError on Vercel) ---
+# --- Generate Protobuf Classes ---
 _messages = message_factory.GetMessages([DESCRIPTOR_1, DESCRIPTOR_2, DESCRIPTOR_3])
 
 AccountPersonalShowInfo = _messages['freefire.AccountPersonalShowInfo']
@@ -86,12 +85,12 @@ def decode_protobuf(encoded_data: bytes, message_type: message.Message) -> messa
     instance.ParseFromString(encoded_data)
     return instance
 
-async def json_to_proto(json_data: str, proto_message: Message) -> bytes:
+def json_to_proto(json_data: str, proto_message: Message) -> bytes:
     json_format.ParseDict(json.loads(json_data), proto_message)
     return proto_message.SerializeToString()
 
-# Token Generation
-async def get_access_token(account_str: str):
+# --- Sync Token Generation (Fixed for Vercel) ---
+def get_access_token(account_str: str):
     url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
     payload = account_str + "&response_type=token&client_type=2&client_secret=2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3&client_id=100067"
     headers = {
@@ -100,14 +99,22 @@ async def get_access_token(account_str: str):
         'Accept-Encoding': "gzip",
         'Content-Type': "application/x-www-form-urlencoded"
     }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(url, data=payload, headers=headers)
-        data = resp.json()
+    
+    with httpx.Client() as client:
+        resp = client.post(url, content=payload.encode('utf-8'), headers=headers, timeout=10.0)
+        if resp.status_code != 200:
+            raise Exception(f"Garena Auth Failed (Blocked or Timeout): HTTP {resp.status_code}")
+            
+        try:
+            data = resp.json()
+        except ValueError:
+            raise Exception(f"Garena returned non-JSON data: {resp.text[:50]}...")
+            
         return data.get("access_token", "0"), data.get("open_id", "0")
 
-async def create_jwt_for_account(idx: int, account_str: str):
+def create_jwt_for_account(idx: int, account_str: str):
     try:
-        token_val, open_id = await get_access_token(account_str)
+        token_val, open_id = get_access_token(account_str)
         body = json.dumps({
             "open_id": open_id,
             "open_id_type": "4",
@@ -115,7 +122,7 @@ async def create_jwt_for_account(idx: int, account_str: str):
             "orign_platform_type": "4"
         })
         
-        proto_bytes = await json_to_proto(body, LoginReq())
+        proto_bytes = json_to_proto(body, LoginReq())
         payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, proto_bytes)
         url = "https://loginbp.ggblueshark.com/MajorLogin"
         headers = {
@@ -128,8 +135,9 @@ async def create_jwt_for_account(idx: int, account_str: str):
             'X-GA': "v1 1",
             'ReleaseVersion': RELEASEVERSION
         }
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, data=payload, headers=headers)
+        
+        with httpx.Client() as client:
+            resp = client.post(url, content=payload, headers=headers, timeout=10.0)
             if resp.status_code != 200 or not resp.content or resp.content.startswith(b'BR_GOP_TOKEN_AUTH_FAILED'):
                 raise RuntimeError(f"Token request failed for account index {idx}")
             
@@ -146,21 +154,21 @@ async def create_jwt_for_account(idx: int, account_str: str):
         print(f"❌ Error generating token for Account [{idx}]: {e}")
         raise e
 
-async def get_rotated_token_info() -> Tuple[int, str, str, str]:
+def get_rotated_token_info() -> Tuple[int, str, str, str]:
     idx = get_next_account_index()
     account_str = ACCOUNTS[idx]
     
     info = token_pool.get(idx)
     if not info or time.time() >= info['expires_at']:
-        info = await create_jwt_for_account(idx, account_str)
+        info = create_jwt_for_account(idx, account_str)
         
     return idx, info['token'], info['region'], info['server_url']
 
-async def GetAccountInformation(uid, unk, endpoint):
-    payload = await json_to_proto(json.dumps({'a': uid, 'b': unk}), GetPlayerPersonalShow())
+def GetAccountInformation(uid, unk, endpoint):
+    payload = json_to_proto(json.dumps({'a': uid, 'b': unk}), GetPlayerPersonalShow())
     data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
     
-    acc_idx, token, lock, server = await get_rotated_token_info()
+    acc_idx, token, lock, server = get_rotated_token_info()
     
     headers = {
         'User-Agent': USERAGENT,
@@ -174,11 +182,11 @@ async def GetAccountInformation(uid, unk, endpoint):
         'ReleaseVersion': RELEASEVERSION
     }
     
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(server+endpoint, data=data_enc, headers=headers)
+    with httpx.Client() as client:
+        resp = client.post(server+endpoint, content=data_enc, headers=headers, timeout=10.0)
         if resp.status_code == 401:
-            await create_jwt_for_account(acc_idx, ACCOUNTS[acc_idx])
-            return await GetAccountInformation(uid, unk, endpoint)
+            create_jwt_for_account(acc_idx, ACCOUNTS[acc_idx])
+            return GetAccountInformation(uid, unk, endpoint)
         
         return json.loads(json_format.MessageToJson(
             decode_protobuf(resp.content, AccountPersonalShowInfo)
@@ -204,14 +212,12 @@ def home():
     return jsonify({
         "App Name": "Info Flask Api",
         "Version": "4.0.0",
+        "Status": "Running Seamlessly",
         "Author": "Zero Gravity",
         "End Point": "/player-info?uid=1765197992",
         "Accounts Pool": f"{len(ACCOUNTS)} Accounts Loaded",
         "Developer": "Shuvo",
-        "Copyright": "© 2025 Zero Gravity - All rights reserved.",
-        "Region": "Global",  
-        "Discord Server": "Zero Gravity",
-        "Last Updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "Copyright": "© 2025 Zero Gravity - All rights reserved."
     })
 
 @app.route('/player-info')
@@ -222,7 +228,7 @@ def get_account_info():
         return jsonify({"error": "Please provide UID."}), 400
 
     try:
-        return_data = asyncio.run(GetAccountInformation(uid, "7", "/GetPlayerPersonalShow"))
+        return_data = GetAccountInformation(uid, "7", "/GetPlayerPersonalShow")
         formatted_json = json.dumps(return_data, indent=2, ensure_ascii=False)
         return formatted_json, 200, {'Content-Type': 'application/json; charset=utf-8'}
 
