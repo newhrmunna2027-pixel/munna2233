@@ -89,7 +89,7 @@ def json_to_proto(json_data: str, proto_message: Message) -> bytes:
     json_format.ParseDict(json.loads(json_data), proto_message)
     return proto_message.SerializeToString()
 
-# --- Sync Token Generation (Fixed for Vercel) ---
+# --- Sync Token Generation ---
 def get_access_token(account_str: str):
     url = "https://ffmconnect.live.gop.garenanow.com/oauth/guest/token/grant"
     payload = account_str + "&response_type=token&client_type=2&client_secret=2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3&client_id=100067"
@@ -101,14 +101,15 @@ def get_access_token(account_str: str):
     }
     
     with httpx.Client() as client:
-        resp = client.post(url, content=payload.encode('utf-8'), headers=headers, timeout=10.0)
+        # Timeout reduced to 7s to prevent Vercel 10s Server Crash
+        resp = client.post(url, content=payload.encode('utf-8'), headers=headers, timeout=7.0)
         if resp.status_code != 200:
             raise Exception(f"Garena Auth Failed (Blocked or Timeout): HTTP {resp.status_code}")
             
         try:
             data = resp.json()
         except ValueError:
-            raise Exception(f"Garena returned non-JSON data: {resp.text[:50]}...")
+            raise Exception(f"Garena returned non-JSON data")
             
         return data.get("access_token", "0"), data.get("open_id", "0")
 
@@ -137,7 +138,7 @@ def create_jwt_for_account(idx: int, account_str: str):
         }
         
         with httpx.Client() as client:
-            resp = client.post(url, content=payload, headers=headers, timeout=10.0)
+            resp = client.post(url, content=payload, headers=headers, timeout=7.0)
             if resp.status_code != 200 or not resp.content or resp.content.startswith(b'BR_GOP_TOKEN_AUTH_FAILED'):
                 raise RuntimeError(f"Token request failed for account index {idx}")
             
@@ -151,7 +152,7 @@ def create_jwt_for_account(idx: int, account_str: str):
             }
             return token_pool[idx]
     except Exception as e:
-        print(f"❌ Error generating token for Account [{idx}]: {e}")
+        print(f"Error generating token for Account [{idx}]: {e}")
         raise e
 
 def get_rotated_token_info() -> Tuple[int, str, str, str]:
@@ -183,7 +184,7 @@ def GetAccountInformation(uid, unk, endpoint):
     }
     
     with httpx.Client() as client:
-        resp = client.post(server+endpoint, content=data_enc, headers=headers, timeout=10.0)
+        resp = client.post(server+endpoint, content=data_enc, headers=headers, timeout=7.0)
         if resp.status_code == 401:
             create_jwt_for_account(acc_idx, ACCOUNTS[acc_idx])
             return GetAccountInformation(uid, unk, endpoint)
@@ -215,9 +216,7 @@ def home():
         "Status": "Running Seamlessly",
         "Author": "Zero Gravity",
         "End Point": "/player-info?uid=1765197992",
-        "Accounts Pool": f"{len(ACCOUNTS)} Accounts Loaded",
-        "Developer": "Shuvo",
-        "Copyright": "© 2025 Zero Gravity - All rights reserved."
+        "Accounts Pool": f"{len(ACCOUNTS)} Accounts Loaded"
     })
 
 @app.route('/player-info')
