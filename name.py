@@ -1,4 +1,3 @@
-# --- START OF FILE name.py ---
 import asyncio
 import time
 import httpx
@@ -49,7 +48,6 @@ AccountPersonalShowInfo = _globals['AccountPersonalShowInfo']
 # 2. CONFIGURATION & MULTI-BOT CREDENTIALS
 # ==========================================
 BOT_ACCOUNTS = [
-    
     {"uid": "4744822452", "pass": "OUT_OF_LAW_47145DFBD348F5F2D68B5D75AFA957AF10BE04EF89332B5B8E5EA"},
     {"uid": "4744822456", "pass": "OUT_OF_LAW_6C6E2DB1FE8C6087D999992B683D28E2ABF6B782E9B1CBDD2B9B0"},
     {"uid": "4744822457", "pass": "OUT_OF_LAW_6C6E2DB1FE8C6087D999992B683D28E2ABF6B782E9B1CBDD2B9B0"},
@@ -104,8 +102,11 @@ async def get_access_token(bot_index: int):
     bot = BOT_ACCOUNTS[bot_index]
     url = "https://100067.connect.garena.com/oauth/guest/token/grant"
     payload = {"uid": bot["uid"], "password": bot["pass"], "response_type": "token", "client_type": "2", "client_id": "100067", "client_secret": "2ee44819e9b4598845141067b281621874d0d5d7af9d8f7e00c1e54715b7d1e3"}
-    headers = {'User-Agent': USERAGENT, 'Connection': "Keep-Alive", 'Accept-Encoding': "gzip", 'Content-Type': "application/x-www-form-urlencoded"}
-    async with httpx.AsyncClient(verify=False) as client:
+    
+    # FIX: Added Connection: close (like main.py) and timeout
+    headers = {'User-Agent': USERAGENT, 'Connection': "close", 'Accept-Encoding': "gzip", 'Content-Type': "application/x-www-form-urlencoded"}
+    
+    async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
         try:
             resp = await client.post(url, data=payload, headers=headers)
             data = resp.json()
@@ -122,9 +123,18 @@ async def create_bd_jwt(bot_index: int):
     payload = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, proto_bytes)
     
     url = "https://loginbp.ggblueshark.com/MajorLogin"
-    headers = {'User-Agent': USERAGENT, 'Connection': "Keep-Alive", 'Accept-Encoding': "gzip", 'Content-Type': "application/octet-stream", 'Expect': "100-continue", 'X-Unity-Version': "2018.4.11f1", 'X-GA': "v1 1", 'ReleaseVersion': RELEASEVERSION}
     
-    async with httpx.AsyncClient(verify=False) as client:
+    # FIX: Removed Expect: 100-continue (causes errors)
+    headers = {
+        'User-Agent': USERAGENT, 
+        'Accept-Encoding': "gzip", 
+        'Content-Type': "application/octet-stream", 
+        'X-Unity-Version': "2018.4.11f1", 
+        'X-GA': "v1 1", 
+        'ReleaseVersion': RELEASEVERSION
+    }
+    
+    async with httpx.AsyncClient(verify=False, timeout=20.0) as client:
         try:
             resp = await client.post(url, data=payload, headers=headers)
             if resp.status_code != 200: return
@@ -136,8 +146,11 @@ async def create_bd_jwt(bot_index: int):
                 
             BD_TOKENS_CACHE[bot_index]['token'] = f"Bearer {real_token}"
             BD_TOKENS_CACHE[bot_index]['server_url'] = msg.get('server_url') or msg.get('serverUrl') or '0'
-            BD_TOKENS_CACHE[bot_index]['expires_at'] = time.time() + 25200 
-        except Exception as e: pass
+            
+            # FIX: Token Expiration reduced to 1 hour (3600s) from 7 hours. 
+            BD_TOKENS_CACHE[bot_index]['expires_at'] = time.time() + 3600 
+        except Exception as e: 
+            pass
 
 async def get_valid_token(bot_index: int) -> Tuple[str, str]:
     cache = BD_TOKENS_CACHE[bot_index]
@@ -153,12 +166,24 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
     data_enc = aes_cbc_encrypt(MAIN_KEY, MAIN_IV, payload)
     
     token, server = await get_valid_token(bot_index)
-    if token == "0": raise Exception("Token generation failed.")
+    if token == "0" or server == "0": raise Exception("Token generation failed.")
         
-    headers = {'User-Agent': USERAGENT, 'Connection': "Keep-Alive", 'Accept-Encoding': "gzip", 'Content-Type': "application/octet-stream", 'Expect': "100-continue", 'Authorization': token, 'X-Unity-Version': "2018.4.11f1", 'X-GA': "v1 1", 'ReleaseVersion': RELEASEVERSION}
+    # FIX: Remove Expect: 100-continue
+    headers = {
+        'User-Agent': USERAGENT, 
+        'Accept-Encoding': "gzip", 
+        'Content-Type': "application/octet-stream", 
+        'Authorization': token, 
+        'X-Unity-Version': "2018.4.11f1", 
+        'X-GA': "v1 1", 
+        'ReleaseVersion': RELEASEVERSION
+    }
     
-    async with httpx.AsyncClient(verify=False) as client:
-        resp = await client.post(server + endpoint, data=data_enc, headers=headers)
+    # FIX: Proper URL formatting
+    full_url = f"{server.rstrip('/')}{endpoint}"
+
+    async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+        resp = await client.post(full_url, data=data_enc, headers=headers)
         if resp.status_code != 200: raise Exception(f"Server Error: {resp.status_code}")
             
         decrypted_content = aes_cbc_decrypt(MAIN_KEY, MAIN_IV, resp.content)
@@ -176,26 +201,30 @@ async def get_account_info():
     uid = request.args.get('uid')
     if not uid: return jsonify({"error": "Please provide UID."}), 400
 
-    current_bot_index = next(bot_cycle)
-
-    try:
-        return_data = await GetAccountInformation(uid, "/GetPlayerPersonalShow", current_bot_index)
-        
-        if not return_data: 
-            return jsonify({"error": "UID not found or empty response."}), 404
+    # ========================================================
+    # FIX: AUTO RETRY / FALLBACK LOGIC
+    # ========================================================
+    # যদি কোনো কারণে ১টা বট কাজ না করে, API আরো ২ বার অন্য বট দিয়ে ট্রাই করবে।
+    last_error = ""
+    for _ in range(3):
+        current_bot_index = next(bot_cycle)
+        try:
+            return_data = await GetAccountInformation(uid, "/GetPlayerPersonalShow", current_bot_index)
             
-        formatted_json = json.dumps(return_data, ensure_ascii=False)
-        return Response(formatted_json, status=200, mimetype='application/json; charset=utf-8')
-        
-    except Exception as e:
-        return jsonify({"error": f"Failed to fetch player info: {str(e)}"}), 500
+            if return_data: 
+                formatted_json = json.dumps(return_data, ensure_ascii=False)
+                return Response(formatted_json, status=200, mimetype='application/json; charset=utf-8')
+                
+        except Exception as e:
+            last_error = str(e)
+            continue # পরবর্তী বটের কাছে যাবে
+
+    # যদি ৩ বারের চেষ্টাতেও ফেইল করে:
+    return jsonify({"error": f"Failed after multiple attempts. Last issue: {last_error}"}), 500
 
 # ==========================================
 # LOCALHOST SUPPORT
 # ==========================================
 if __name__ == '__main__':
-    # This block will ONLY run if you execute this file locally (e.g., `python info.py` or `python name.py`).
-    # It will NOT run on Vercel, because Vercel uses the `app` object directly via WSGI.
     print("Running in Localhost mode...")
     app.run(host='0.0.0.0', port=5000, debug=True)
-# --- END OF FILE name.py ---
