@@ -10,6 +10,8 @@ from typing import Tuple
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 import base64
+# (অন্যান্য ইম্পোর্টের সাথে এটি যোগ করো)
+from protobuf_decoder.protobuf_decoder import Parser
 
 # ==========================================
 # 1. NATIVE PROTOBUF INJECTION
@@ -158,8 +160,31 @@ async def get_valid_token(bot_index: int) -> Tuple[str, str]:
         await create_bd_jwt(bot_index)
     return BD_TOKENS_CACHE[bot_index]['token'], BD_TOKENS_CACHE[bot_index]['server_url']
 
+
 # ==========================================
-# 5. FETCH PLAYER INFO (WITH RAW DEBUGGER)
+# RAW PROTOBUF DECODER (SCHEMA BYPASS)
+# ==========================================
+def Fix_PackEt(parsed_results):
+    result_dict = {}
+    for result in parsed_results:
+        field_data = {}
+        field_data['wire_type'] = result.wire_type
+        if result.wire_type == "varint": field_data['data'] = result.data
+        elif result.wire_type == "string": field_data['data'] = result.data
+        elif result.wire_type == "bytes": field_data['data'] = result.data
+        elif result.wire_type == 'length_delimited': field_data["data"] = Fix_PackEt(result.data.results)
+        result_dict[result.field] = field_data
+    return result_dict
+
+def DeCode_Raw_Protobuf(hex_string):
+    try:
+        parsed_results = Parser().parse(hex_string)
+        return Fix_PackEt(parsed_results)
+    except Exception as e:
+        return {"error": f"Raw Decode Failed: {str(e)}"}
+
+# ==========================================
+# 5. FETCH PLAYER INFO 
 # ==========================================
 async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
     payload = await json_to_proto(json.dumps({'a': uid, 'b': 7}), GetPlayerPersonalShow())
@@ -168,8 +193,7 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
     token, server = await get_valid_token(bot_index)
     
     if token == "0" or server == "0": 
-        # টোকেন ফেইল হলে কোন বটের টোকেন ফেইল হলো সেটা দেখার জন্য
-        raise Exception(json.dumps({"error": f"Token generation failed for Bot Index {bot_index}"}))
+        raise Exception("Token generation failed.")
         
     headers = {
         'User-Agent': USERAGENT, 
@@ -187,35 +211,25 @@ async def GetAccountInformation(uid: str, endpoint: str, bot_index: int):
         resp = await client.post(full_url, data=data_enc, headers=headers)
         
         if resp.status_code != 200: 
-            raise Exception(json.dumps({"error": f"HTTP Error {resp.status_code}", "body": resp.text}))
+            raise Exception(f"HTTP Error {resp.status_code}")
             
         decrypted_content = aes_cbc_decrypt(MAIN_KEY, MAIN_IV, resp.content)
         
         try:
-            # নরমালি ডিকোড করার চেষ্টা করবে
+            # প্রথমে নরমাল স্কিমা দিয়ে ট্রাই করবে
             parsed_data = decode_protobuf(decrypted_content, AccountPersonalShowInfo)
             return json.loads(json_format.MessageToJson(parsed_data, preserving_proto_field_name=True))
         
         except Exception as e:
-            # 🚨 যদি ডিকোড ফেইল করে, তাহলে গ্যারেনার আসল ডাটা ক্যাপচার করবে
+            # 🚨 স্কিমা ফেইল করলে Raw Schema-less Decoder ব্যবহার করবে 🚨
             raw_hex = decrypted_content.hex()
+            raw_json_data = DeCode_Raw_Protobuf(raw_hex)
             
-            # ডাটাটি যদি Text বা JSON ফরম্যাটে থাকে, সেটা বের করার চেষ্টা
-            raw_text = ""
-            try:
-                raw_text = decrypted_content.decode('utf-8', errors='ignore')
-            except:
-                raw_text = "Not readable text"
-
-            # Error মেসেজ হিসেবে Raw ডাটা থ্রো করবে
-            debug_info = {
-                "message": "Failed to Parse Protobuf. See Raw Data below.",
-                "bot_index_used": bot_index,
-                "garena_raw_text": raw_text,
-                "garena_raw_hex": raw_hex,
-                "python_error": str(e)
+            return {
+                "status": "OB53 Schema Bypassed",
+                "message": "Player Data extracted using Raw Decoder.",
+                "raw_data": raw_json_data
             }
-            raise Exception(json.dumps(debug_info))
 
 # ==========================================
 # 6. ASYNC FLASK ROUTE FOR VERCEL & LOCALHOST
