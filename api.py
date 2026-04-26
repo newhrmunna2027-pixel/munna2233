@@ -3,6 +3,7 @@ import asyncio
 import time
 import httpx
 import json
+import random
 import threading
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -44,7 +45,7 @@ MAIN_IV = base64.b64decode('Nm95WkRyMjJFM3ljaGpNJQ==')
 RELEASEVERSION = "OB53"
 USERAGENT = "Dalvik/2.1.0 (Linux; U; Android 13; CPH2095 Build/RKQ1.211119.001)"
 
-# === Multiple Accounts Setup (Round-Robin) ===
+# === Multiple Accounts Setup (Randomized) ===
 ACCOUNTS = [
     "uid=4744822457&password=OUT_OF_LAW_6C6E2DB1FE8C6087D999992B683D28E2ABF6B782E9B1CBDD2B9B0",
     "uid=4744822455&password=OUT_OF_LAW_49498E67BDAED34F1EB9D2845C96AB5BBDA28F4EC6D6AE88891CC",
@@ -56,17 +57,11 @@ ACCOUNTS = [
     "uid=4744822470&password=OUT_OF_LAW_7FB007F5A8F15FC8F4C2622D65A7112379F81AD285DA44395CDFE"
 ]
 
-account_index = 0
-account_lock = threading.Lock()
 token_pool = {}
 
-def get_next_account_index() -> int:
-    """Thread-safe round-robin counter to pick the next account."""
-    global account_index
-    with account_lock:
-        current_idx = account_index
-        account_index = (account_index + 1) % len(ACCOUNTS)
-        return current_idx
+def get_random_account_index() -> int:
+    """Randomly pick an account index to avoid Vercel instances colliding"""
+    return random.randint(0, len(ACCOUNTS) - 1)
 
 # Flask App Setup
 app = Flask(__name__)
@@ -108,6 +103,12 @@ async def get_access_token(account_str: str):
 
 async def create_jwt_for_account(idx: int, account_str: str):
     try:
+        # --- Random Delay / Jitter Logic Added Here ---
+        # 0.5 to 2.0 seconds delay to prevent multiple Vercel instances 
+        # from hitting the login server at the exact same time
+        delay_time = random.uniform(0.5, 2.0)
+        await asyncio.sleep(delay_time)
+
         token_val, open_id = await get_access_token(account_str)
         body = json.dumps({
             "open_id": open_id,
@@ -148,7 +149,8 @@ async def create_jwt_for_account(idx: int, account_str: str):
         raise e
 
 async def get_rotated_token_info() -> Tuple[int, str, str, str]:
-    idx = get_next_account_index()
+    # Use random index instead of round-robin
+    idx = get_random_account_index()
     account_str = ACCOUNTS[idx]
     
     info = token_pool.get(idx)
