@@ -120,10 +120,11 @@ async def create_jwt_for_account(idx: int, account_str: str):
             'Accept-Encoding': "gzip",
             'Content-Type': "application/octet-stream",
             'Expect': "100-continue",
+            'Authorization': token,
             'X-Unity-Version': "2018.4.11f1",
             'X-GA': "v1 1",
             'ReleaseVersion': RELEASEVERSION
-        }
+            }
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, data=payload, headers=headers)
             if resp.status_code != 200 or not resp.content or resp.content.startswith(b'BR_GOP_TOKEN_AUTH_FAILED'):
